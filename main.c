@@ -55,12 +55,16 @@ typedef struct Matrix {
 } Matrix;
 
 typedef struct {
-    Matrix transform;
     Matrix projection;
     Matrix view;
     float color[3];
     float light[3]; 
 } Constants;
+
+typedef struct {
+    Matrix transform;
+    float color[3];
+} Instance;
 
 typedef struct Camera {
     float rotation[3];
@@ -441,17 +445,17 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         IDXGIFactory_Release(factory);
     }
 
-    struct Vertex
+    typedef struct
     {
         float position[3];
         float normal[3];
         float uv[2];
         float color[3];
-    };
+    } Vertex;
 
     ID3D11Buffer* vbuffer;
     {
-        struct Vertex data[] =
+        Vertex data[] =
         {
             /*
             { { -0.00f, +0.75f }, { 25.0f, 50.0f }, { 1, 0, 0 } },
@@ -623,10 +627,16 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         // these must match vertex shader input layout (VS_INPUT in vertex shader source below)
         D3D11_INPUT_ELEMENT_DESC desc[] =
         {
-            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(struct Vertex, position), D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(struct Vertex, normal),   D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(struct Vertex, uv),       D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(struct Vertex, color),    D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, position), D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, normal),   D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(Vertex, uv),       D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, color),    D3D11_INPUT_PER_VERTEX_DATA, 0 },
+
+            { "TRANSFORM", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 0,  D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TRANSFORM", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TRANSFORM", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TRANSFORM", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 48, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "ICOLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT,    1, 64, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
 
 #if 0
@@ -657,10 +667,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             "                                                           \n"
             "struct VS_INPUT                                            \n"
             "{                                                          \n"
-            "     float3 pos   : POSITION;                              \n" // these names must match D3D11_INPUT_ELEMENT_DESC array
-            "     float3 normal: NORMAL;                                \n" 
-            "     float2 uv    : TEXCOORD;                              \n"
-            "     float3 color : COLOR;                                 \n"
+            "     float3   pos       : POSITION;                        \n" // these names must match D3D11_INPUT_ELEMENT_DESC array
+            "     float3   normal    : NORMAL;                          \n" 
+            "     float2   uv        : TEXCOORD;                        \n"
+            "     float3   color     : COLOR;                           \n"
+            "     float4x4 transform : TRANSFORM;                       \n"
+            "     float3   icolor    : ICOLOR;                          \n"
             "};                                                         \n"
             "                                                           \n"
             "struct PS_INPUT                                            \n"
@@ -672,7 +684,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             "                                                           \n"
             "cbuffer cbuffer0 : register(b0)                            \n" // b0 = constant buffer bound to slot 0
             "{                                                          \n"
-            "    float4x4 uTransform;                                   \n"
             "    float4x4 uProjection;                                  \n"
             "    float4x4 uView;                                        \n"
             "    float3   uColor;                                       \n"
@@ -685,21 +696,20 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             "                                                           \n"
             "PS_INPUT vs(VS_INPUT input)                                \n"
             "{                                                          \n"
-            "     float light = clamp(dot(normalize(mul(float4(input.normal, 0.0f), uTransform).xyz), normalize(-uLight)), 0.0f, 1.0f) * 0.8f + 0.2f;                                                          \n"
+            "    float light = clamp(dot(normalize(mul(float4(input.normal, 0.0f), input.transform).xyz), normalize(-uLight)), 0.0f, 1.0f) * 0.8f + 0.2f;                                                          \n"
             "                                                           \n"
             "    PS_INPUT output;                                       \n"
-            "    //output.pos = mul(uProjection, mul(uView, mul(uTransform, float4(input.pos, 1))));    \n"
-            "    output.pos = mul(mul(mul(uProjection, uView),uTransform), float4(input.pos, 1));    \n"
-            "    //output.pos = mul(mul(mul(uTransform, uView),uProjection), float4(input.pos, 1));    \n"
+            "    output.pos = mul(mul(mul(uProjection, uView),input.transform), float4(input.pos, 1));    \n"
             "    output.uv = input.uv;                                  \n"
-            "    output.color = float4(uColor * light, 1.0f) * float4(input.color, 1.0f);                      \n"
+            "    output.color = float4(uColor * light, 1.0f) * float4(input.color, 1.0f) * float4(input.icolor, 1.0f); \n"
+            "    // output.color = float4(uColor * light, 1.0f) * float4(input.color, 1.0f); \n"
             "    return output;                                         \n"
             "}                                                          \n"
             "                                                           \n"
             "float4 ps(PS_INPUT input) : SV_TARGET                      \n"
             "{                                                          \n"
-            "    //float4 tex = texture0.Sample(sampler0, input.uv);    \n"
-            "    //return float4(0.2, 0, 0, 1);                         \n"
+            "    // float4 tex = texture0.Sample(sampler0, input.uv);   \n"
+            "    // return float4(0.2, 0, 0, 1);                        \n"
             "    return input.color;                                    \n"
             "}                                                          \n";
         ;
@@ -937,6 +947,21 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         }
     }
 
+    // Create instance buffer for entities
+    Instance *instanceData = malloc(sizeof(Instance) * entity_count);
+    ID3D11Buffer* instanceBuffer;
+    {
+        D3D11_BUFFER_DESC desc = 
+        {
+            .ByteWidth = (sizeof(Instance) * entity_count),
+            .Usage = D3D11_USAGE_DYNAMIC,
+            .BindFlags = D3D11_BIND_VERTEX_BUFFER,
+            .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
+        };
+        D3D11_SUBRESOURCE_DATA initial = {.pSysMem = instanceData};
+        ID3D11Device_CreateBuffer(device, &desc, &initial, &instanceBuffer);
+    }
+
     input.up    = false;
     input.left  = false;
     input.right = false;
@@ -1088,9 +1113,83 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             ID3D11DeviceContext_ClearRenderTargetView(context, rtView, color);
             ID3D11DeviceContext_ClearDepthStencilView(context, dsView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.f, 0);
 
+            // Update constant buffer (once per frame)
+            float aspect = (float)height / width;
+
+            Cube *center_cube = &cubes[(entity_count/2) + (columns/2)];
+
+            Float3 eye = {
+                .x = camera.position[0], 
+                .y = camera.position[1], 
+                .z = camera.position[2],
+            };
+
+            Float3 center = {
+                .x = center_cube->position[0],
+                .y = center_cube->position[1],
+                .z = center_cube->position[2],
+            };
+
+            Float3 up = {
+                .x = 0.0f, 
+                .y = 1.0f, 
+                .z = 0.0f, 
+            };
+
+            Matrix view = look_at(eye, center, up);
+
+            float pnear = 0.1;
+            float pfar  = 5000.0;
+
+            float fov = 103;
+            float scale = 1 / (tan(fov * 0.5 * PI/180));
+
+            Matrix projection =
+            {
+                2*pnear/w,    0,             0,                       0,
+                0,            2*pnear/h,     0,                       0,
+                0,            0,             pfar/(pfar-pnear),       1,
+                0,            0,             pnear*pfar/(pnear-pfar), 0,
+            };
+
+            projection.m[0][0] = scale*aspect;
+            projection.m[1][1] = scale;
+
+#ifdef LOGGING
+            printf("View\n");
+            print_matrix(view);
+            printf("\n");
+            printf("Projection\n");
+            print_matrix(projection);
+            printf("\n");
+
+            printf("Camera position: (%f, %f, %f)\n", camera.position[0], camera.position[1], camera.position[2]);
+            printf("\n");
+#endif
+
+            Constants constants;
+            constants.view = view;
+            constants.projection = projection;
+
+            constants.light[0] =  1.0f; 
+            constants.light[1] =  1.0f;
+            constants.light[2] = +1.0f; 
+
+            constants.color[0] = 1.0f;
+            constants.color[1] = 1.0f;
+            constants.color[2] = 1.0f;
+
+            D3D11_MAPPED_SUBRESOURCE mapped;
+            ID3D11DeviceContext_Map(context, (ID3D11Resource*)ubuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+            memcpy(mapped.pData, &constants, sizeof(constants));
+            ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)ubuffer, 0);
+
             //
-            // TODO(bkaylor): Loop over entities here
+            // Loop over entities here
             //
+            D3D11_MAPPED_SUBRESOURCE mappedInstanceBuffer;
+            ID3D11DeviceContext_Map(context, (ID3D11Resource*)instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedInstanceBuffer);
+
             for (int i = 0; i < entity_count; i += 1)
             {
                 Cube *cube = &cubes[i];
@@ -1151,15 +1250,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                 }
 
                 //
-                // TODO(bkaylor): Rotate/Scale/Translate
+                // Rotate/Scale/Translate
                 // 
 
                 // setup 4x4c rotation matrix in uniform
                 {
                     // angle += delta * 2.0f * (float)M_PI / 20.0f; // full rotation in 20 seconds
                     // angle = fmodf(angle, 2.0f * (float)M_PI);
-
-                    float aspect = (float)height / width;
 
                     Matrix transform; 
                     {
@@ -1213,105 +1310,50 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                         transform = matrix_multiply(transform, translate);
                     }
 
-                    Cube *center_cube = &cubes[(entity_count/2) + (columns/2)];
-
-                    Float3 eye = {
-                        .x = camera.position[0], 
-                        .y = camera.position[1], 
-                        .z = camera.position[2],
-                    };
-
-                    Float3 center = {
-                        .x = center_cube->position[0],
-                        .y = center_cube->position[1],
-                        .z = center_cube->position[2],
-                    };
-
-                    Float3 up = {
-                        .x = 0.0f, 
-                        .y = 1.0f, 
-                        .z = 0.0f, 
-                    };
-
-                    Matrix view = look_at(eye, center, up);
-
-                    float pnear = 0.1;
-                    float pfar  = 5000.0;
-
-                    float fov = 103;
-                    float scale = 1 / (tan(fov * 0.5 * PI/180));
-
-                    Matrix projection =
-                    {
-                        2*pnear/w,    0,             0,                       0,
-                        0,            2*pnear/h,     0,                       0,
-                        0,            0,             pfar/(pfar-pnear),       1,
-                        0,            0,             pnear*pfar/(pnear-pfar), 0,
-                    };
-
-                    projection.m[0][0] = scale*aspect;
-                    projection.m[1][1] = scale;
-
 #ifdef LOGGING
                     printf("Transform\n");
                     print_matrix(transform);
                     printf("\n");
-                    printf("View\n");
-                    print_matrix(view);
-                    printf("\n");
-                    printf("Projection\n");
-                    print_matrix(projection);
-                    printf("\n");
-
-                    printf("Camera position: (%f, %f, %f)\n", camera.position[0], camera.position[1], camera.position[2]);
-                    printf("\n");
 #endif
 
-                    Constants constants;
-                    constants.transform = transform;
-                    constants.view = view;
-                    constants.projection = projection;
-                    //constants.color = cube->color;
-                    memcpy(constants.color, cube->color, sizeof(constants.color));
-                    constants.light[0] =  1.0f; 
-                    constants.light[1] =  1.0f;
-                    constants.light[2] = +1.0f; 
+                    instanceData[i].transform = transform;
+                    memcpy(instanceData[i].color, cube->color, (sizeof(float) * 3));
 
-                    D3D11_MAPPED_SUBRESOURCE mapped;
-                    ID3D11DeviceContext_Map(context, (ID3D11Resource*)ubuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-                    memcpy(mapped.pData, &constants, sizeof(constants));
-                    ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)ubuffer, 0);
                 }
-
-                // Input Assembler
-                ID3D11DeviceContext_IASetInputLayout(context, layout);
-                ID3D11DeviceContext_IASetPrimitiveTopology(context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                UINT stride = sizeof(struct Vertex);
-                UINT offset = 0;
-                ID3D11DeviceContext_IASetVertexBuffers(context, 0, 1, &vbuffer, &stride, &offset);
-                ID3D11DeviceContext_IASetIndexBuffer(context, ibuffer, DXGI_FORMAT_R32_UINT, 0);
-
-                // Vertex Shader
-                ID3D11DeviceContext_VSSetConstantBuffers(context, 0, 1, &ubuffer);
-                ID3D11DeviceContext_VSSetShader(context, vshader, NULL, 0);
-
-                // Rasterizer Stage
-                ID3D11DeviceContext_RSSetViewports(context, 1, &viewport);
-                ID3D11DeviceContext_RSSetState(context, rasterizerState);
-
-                // Pixel Shader
-                ID3D11DeviceContext_PSSetSamplers(context, 0, 1, &sampler);
-                ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &textureView);
-                ID3D11DeviceContext_PSSetShader(context, pshader, NULL, 0);
-
-                // Output Merger
-                ID3D11DeviceContext_OMSetBlendState(context, blendState, NULL, ~0U);
-                ID3D11DeviceContext_OMSetDepthStencilState(context, depthState, 0);
-                ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtView, dsView);
-
-                // draw all vertices in index buffer
-                ID3D11DeviceContext_DrawIndexed(context, ARRAYSIZE(indexData), 0, 0);
             }
+
+            memcpy(mappedInstanceBuffer.pData, instanceData, (sizeof(Instance) * entity_count));
+            ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)instanceBuffer, 0);
+
+            // Input Assembler
+            ID3D11DeviceContext_IASetInputLayout(context, layout);
+            ID3D11DeviceContext_IASetPrimitiveTopology(context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            UINT strides[2] = {sizeof(Vertex), sizeof(Instance)};
+            UINT offsets[2] = {0, 0};
+            ID3D11Buffer *buffers[2] = {vbuffer, instanceBuffer};
+            ID3D11DeviceContext_IASetVertexBuffers(context, 0, 2, buffers, strides, offsets);
+            ID3D11DeviceContext_IASetIndexBuffer(context, ibuffer, DXGI_FORMAT_R32_UINT, 0);
+
+            // Vertex Shader
+            ID3D11DeviceContext_VSSetConstantBuffers(context, 0, 1, &ubuffer);
+            ID3D11DeviceContext_VSSetShader(context, vshader, NULL, 0);
+
+            // Rasterizer Stage
+            ID3D11DeviceContext_RSSetViewports(context, 1, &viewport);
+            ID3D11DeviceContext_RSSetState(context, rasterizerState);
+
+            // Pixel Shader
+            ID3D11DeviceContext_PSSetSamplers(context, 0, 1, &sampler);
+            ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &textureView);
+            ID3D11DeviceContext_PSSetShader(context, pshader, NULL, 0);
+
+            // Output Merger
+            ID3D11DeviceContext_OMSetBlendState(context, blendState, NULL, ~0U);
+            ID3D11DeviceContext_OMSetDepthStencilState(context, depthState, 0);
+            ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtView, dsView);
+
+            // draw all vertices in index buffer
+            ID3D11DeviceContext_DrawIndexedInstanced(context, ARRAYSIZE(indexData), entity_count, 0, 0, 0);
         }
 
         // change to FALSE to disable vsync
