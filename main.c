@@ -362,8 +362,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
     freopen_s(&dummy, "CONOUT$", "w", stdout);
     printf("Hello, console!\n");
 
-    // TODO(bkaylor): Enable and check d3d11 debug layer.
-
     // create D3D11 device & context
     {
         UINT flags = 0;
@@ -510,78 +508,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         D3D11_SUBRESOURCE_DATA initial = { .pSysMem = data };
         ID3D11Device_CreateBuffer(device, &desc, &initial, &vbuffer);
     }
-
-    /*
-    // TODO(bkaylor): This is the index buffer I came up with, but it's wrong! Why?
-    UINT indexData[] = 
-    {
-        0, 1, 2,
-        2, 3, 0,
-
-        5, 4, 7,
-        7, 6, 5,
-
-        1, 5, 3, 
-        3, 7, 1,
-
-        4, 0, 6,
-        6, 2, 4,
-
-        4, 5, 0,
-        0, 1, 4,
-
-        2, 3, 6,
-        6, 7, 2,
-    };
-    */
-
-    /*
-    UINT indexData[] =
-    {
-		// front
-		0, 1, 2,
-		2, 3, 0,
-		// right
-		1, 5, 6,
-		6, 2, 1,
-		// back
-		7, 6, 5,
-		5, 4, 7,
-		// left
-		4, 0, 3,
-		3, 7, 4,
-		// bottom
-		4, 5, 1,
-		1, 0, 4,
-		// top
-		3, 2, 6,
-		6, 7, 3
-    };
-    */
-
-    /*
-    UINT indexData[] =
-    {
-		// back  
-		0, 1, 2,
-		2, 3, 0,
-		// left
-        4, 5, 6,
-        6, 7, 4,
-		// right
-        8, 9, 10,
-        10, 11, 8,
-		// top
-        12, 13, 14,
-        14, 15, 12,
-		// bottom
-        16, 17, 18,
-        18, 19, 16,
-		// front 
-        20, 21, 22,
-        22, 23, 20,
-    };
-    */
 
     UINT indexData[] =
     {
@@ -889,7 +815,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
     float h = (float) height;
 
     //
-    // TODO(bkaylor) Initialize camera
+    // Initialize camera
     //
 
     Camera camera;
@@ -943,7 +869,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             cube->position[1] = i*y_space - y_offset;
             cube->position[2] = 1001.0f;
 
-            cube->alive = rand() % 2 == 0;
+            cube->alive = (rand() % 20 == 0);
         }
     }
 
@@ -968,6 +894,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
     input.down  = false;
     input.in    = false;
     input.out   = false;
+
+    int frame = 0;
 
     for (;;)
     {
@@ -1155,18 +1083,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             projection.m[0][0] = scale*aspect;
             projection.m[1][1] = scale;
 
-#ifdef LOGGING
-            printf("View\n");
-            print_matrix(view);
-            printf("\n");
-            printf("Projection\n");
-            print_matrix(projection);
-            printf("\n");
-
-            printf("Camera position: (%f, %f, %f)\n", camera.position[0], camera.position[1], camera.position[2]);
-            printf("\n");
-#endif
-
             Constants constants;
             constants.view = view;
             constants.projection = projection;
@@ -1193,60 +1109,53 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             for (int i = 0; i < entity_count; i += 1)
             {
                 Cube *cube = &cubes[i];
-#if 1
+
                 // Game of life simulation
-
-                int r = i / columns;
-                int c = i % columns; 
-
-                int living_neighbors = 0;
-
-                living_neighbors += check(cubes, rows, columns, r-1, c-1); 
-                living_neighbors += check(cubes, rows, columns, r-1, c); 
-                living_neighbors += check(cubes, rows, columns, r-1, c+1); 
-
-                living_neighbors += check(cubes, rows, columns, r, c-1); 
-                living_neighbors += check(cubes, rows, columns, r, c+1); 
-
-                living_neighbors += check(cubes, rows, columns, r+1, c-1); 
-                living_neighbors += check(cubes, rows, columns, r+1, c); 
-                living_neighbors += check(cubes, rows, columns, r+1, c+1); 
-
-                if (cube->alive)
+                if (frame % 50 == 0)
                 {
-                    if (2 <= living_neighbors && living_neighbors <= 3)
+                    int r = i / columns;
+                    int c = i % columns; 
+
+                    int living_neighbors = 0;
+
+                    living_neighbors += check(cubes, rows, columns, r-1, c-1); 
+                    living_neighbors += check(cubes, rows, columns, r-1, c); 
+                    living_neighbors += check(cubes, rows, columns, r-1, c+1); 
+
+                    living_neighbors += check(cubes, rows, columns, r, c-1); 
+                    living_neighbors += check(cubes, rows, columns, r, c+1); 
+
+                    living_neighbors += check(cubes, rows, columns, r+1, c-1); 
+                    living_neighbors += check(cubes, rows, columns, r+1, c); 
+                    living_neighbors += check(cubes, rows, columns, r+1, c+1); 
+
+                    if (cube->alive)
                     {
-                        cube->alive = true;
+                        cube->alive = (living_neighbors == 2 || living_neighbors == 3);
                     }
                     else
                     {
-                        cube->alive = false;
+                        cube->alive = (living_neighbors == 3);
                     }
                 }
-                else
-                {
-                    if (living_neighbors == 3)
-                    {
-                        cube->alive = true;
-                    }
-                    else
-                    {
-                        cube->alive = false;
-                    }
-                }
-#endif
 
                 if (cube->alive)
                 {
                     cube->color[0] = 0.9f;
                     cube->color[1] = 0.9f;
                     cube->color[2] = 0.9f;
+
+                    cube->rotation[2] += 0.01f;
+
+                    cube->position[2] -= 0.05f;
                 }
                 else
                 {
                     cube->color[0] = 0.1f;
                     cube->color[1] = 0.1f;
                     cube->color[2] = 0.1f;
+
+                    cube->position[2] += 0.05f;
                 }
 
                 //
@@ -1310,12 +1219,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                         transform = matrix_multiply(transform, translate);
                     }
 
-#ifdef LOGGING
-                    printf("Transform\n");
-                    print_matrix(transform);
-                    printf("\n");
-#endif
-
                     instanceData[i].transform = transform;
                     memcpy(instanceData[i].color, cube->color, (sizeof(float) * 3));
 
@@ -1338,7 +1241,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             ID3D11DeviceContext_VSSetConstantBuffers(context, 0, 1, &ubuffer);
             ID3D11DeviceContext_VSSetShader(context, vshader, NULL, 0);
 
-            // Rasterizer Stage
+            // Rasterizer StagFALSEe
             ID3D11DeviceContext_RSSetViewports(context, 1, &viewport);
             ID3D11DeviceContext_RSSetState(context, rasterizerState);
 
@@ -1357,7 +1260,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         }
 
         // change to FALSE to disable vsync
-        BOOL vsync = TRUE;
+        BOOL vsync = FALSE;
         hr = IDXGISwapChain1_Present(swapChain, vsync ? 1 : 0, 0);
         if (hr == DXGI_STATUS_OCCLUDED)
         {
@@ -1371,6 +1274,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         {
             FatalError("Failed to present swap chain! Device lost?");
         }
+
+        frame += 1;
     }
 }
 
