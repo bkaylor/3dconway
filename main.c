@@ -31,7 +31,7 @@
 #define STR2(x) #x
 #define STR(x) STR2(x)
 
-#define PI 3.13159265f
+#define PI 3.14159265f
 
 #undef NDEBUG
 
@@ -256,6 +256,8 @@ typedef struct Input {
     bool down;
     bool in;
     bool out;
+    bool reset;
+    bool vsync;
 } Input;
 
 Input input;
@@ -286,6 +288,14 @@ void update_input()
     {
         input.out = true;
     }
+    if (GetAsyncKeyState('R'))
+    {
+        input.reset = true;
+    }
+    if (GetAsyncKeyState('V'))
+    {
+        input.vsync = true;
+    }
 }
 
 static LRESULT CALLBACK WindowProc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -308,6 +318,22 @@ static LRESULT CALLBACK WindowProc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lpa
     }
 
     return DefWindowProcW(wnd, msg, wparam, lparam);
+}
+
+static void reset_cubes(Cube *cubes, int entity_count)
+{
+    for (int i = 0; i < entity_count; i += 1)
+    {
+        Cube *cube = &cubes[i];
+
+        cube->rotation[0] = 0.0f;
+        cube->rotation[1] = 0.0f;
+        cube->rotation[2] = 0.0f;
+
+        cube->position[2] = 1001.0f;
+
+        cube->alive = (rand() % 20 == 0);
+    }
 }
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, int cmdshow)
@@ -442,6 +468,38 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         IDXGIFactory_MakeWindowAssociation(factory, window, DXGI_MWA_NO_ALT_ENTER);
         IDXGIFactory_Release(factory);
     }
+
+    // Create MSAA render target
+    int msaax = 8;
+    ID3D11Texture2D* msaaRenderTarget;
+    ID3D11Texture2D* resolvedTexture;
+    {
+        D3D11_TEXTURE2D_DESC msaaDesc =
+        {
+            // TODO(bkaylor): Get actual width and height
+            .Width = 1904,
+            .Height = 990,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+            .SampleDesc = { msaax, 0 },
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_RENDER_TARGET,
+            .CPUAccessFlags = 0,
+            .MiscFlags = 0,
+        };
+
+        hr = ID3D11Device_CreateTexture2D(device, &msaaDesc, NULL, &msaaRenderTarget);
+
+        {
+            msaaDesc.SampleDesc.Count = 1;
+            hr = ID3D11Device_CreateTexture2D(device, &msaaDesc, NULL, &resolvedTexture);
+        }
+
+    }
+
+    ID3D11RenderTargetView* msaaRenderTargetView;
+    hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource*)msaaRenderTarget, NULL, &msaaRenderTargetView);
 
     typedef struct
     {
@@ -837,7 +895,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
     int entity_count = rows*columns;
 
     Cube *cubes = malloc(sizeof(Cube) * entity_count);
-
     for (int i = 0; i < rows; i += 1)
     {
         for (int j = 0; j < columns; j += 1)
@@ -894,8 +951,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
     input.down  = false;
     input.in    = false;
     input.out   = false;
+    input.reset = false;
+    input.vsync = false;
 
     int frame = 0;
+    BOOL vsync = TRUE;
 
     for (;;)
     {
@@ -955,6 +1015,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         {
             camera.position[2] -= speed;
         }
+        if (input.reset)
+        {
+            reset_cubes(cubes, entity_count);
+        }
+        if (input.vsync)
+        {
+            vsync = !vsync;
+        }
 
         input.up    = false;
         input.left  = false;
@@ -962,6 +1030,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
         input.down  = false;
         input.in    = false;
         input.out   = false;
+        input.reset = false;
+        input.vsync = false;
 
         //
         // Render
@@ -1001,7 +1071,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                     .MipLevels = 1,
                     .ArraySize = 1,
                     .Format = DXGI_FORMAT_D32_FLOAT, // or use DXGI_FORMAT_D32_FLOAT_S8X24_UINT if you need stencil
-                    .SampleDesc = { 1, 0 },
+                    .SampleDesc = { msaax, 0 },
                     .Usage = D3D11_USAGE_DEFAULT,
                     .BindFlags = D3D11_BIND_DEPTH_STENCIL,
                 };
@@ -1038,7 +1108,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
 
             // clear screen
             FLOAT color[] = { 0.392f, 0.584f, 0.929f, 1.f };
-            ID3D11DeviceContext_ClearRenderTargetView(context, rtView, color);
+            ID3D11DeviceContext_ClearRenderTargetView(context, msaaRenderTargetView, color);
             ID3D11DeviceContext_ClearDepthStencilView(context, dsView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.f, 0);
 
             // Update constant buffer (once per frame)
@@ -1111,7 +1181,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                 Cube *cube = &cubes[i];
 
                 // Game of life simulation
-                if (frame % 50 == 0)
+                if (frame % 144 == 0)
                 {
                     int r = i / columns;
                     int c = i % columns; 
@@ -1155,7 +1225,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
                     cube->color[1] = 0.1f;
                     cube->color[2] = 0.1f;
 
-                    cube->position[2] += 0.05f;
+                    // cube->position[2] += 0.05f;
                 }
 
                 //
@@ -1253,14 +1323,23 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previnstance, LPSTR cmdline, in
             // Output Merger
             ID3D11DeviceContext_OMSetBlendState(context, blendState, NULL, ~0U);
             ID3D11DeviceContext_OMSetDepthStencilState(context, depthState, 0);
-            ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtView, dsView);
+            // ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtView, dsView);
+
+            // Render to msaa texture
+            ID3D11DeviceContext_OMSetRenderTargets(context, 1, &msaaRenderTargetView, dsView);
 
             // draw all vertices in index buffer
             ID3D11DeviceContext_DrawIndexedInstanced(context, ARRAYSIZE(indexData), entity_count, 0, 0, 0);
         }
 
+        ID3D11DeviceContext_ResolveSubresource(context, (ID3D11Resource*)resolvedTexture, 0, (ID3D11Resource*)msaaRenderTarget, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+
+        ID3D11Texture2D* backBuffer;
+        IDXGISwapChain1_GetBuffer(swapChain, 0, &IID_ID3D11Texture2D, (void**)&backBuffer);
+
+        ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)backBuffer, (ID3D11Resource*)resolvedTexture);
+
         // change to FALSE to disable vsync
-        BOOL vsync = FALSE;
         hr = IDXGISwapChain1_Present(swapChain, vsync ? 1 : 0, 0);
         if (hr == DXGI_STATUS_OCCLUDED)
         {
